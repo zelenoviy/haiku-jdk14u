@@ -71,7 +71,7 @@ isAsciiDigit(char c)
   #define opendir opendir64
   #define readdir readdir64
   #define closedir closedir64
-#elif defined(_ALLBSD_SOURCE)
+#elif defined(_ALLBSD_SOURCE) || defined(__HAIKU__)
   #define FD_DIR "/dev/fd"
 #else
   #define FD_DIR "/proc/self/fd"
@@ -80,6 +80,9 @@ isAsciiDigit(char c)
 int
 closeDescriptors(void)
 {
+#ifdef __HAIKU__
+    return 0;
+#else
     DIR *dp;
     struct dirent *dirp;
     int from_fd = FAIL_FILENO + 1;
@@ -113,6 +116,7 @@ closeDescriptors(void)
     closedir(dp);
 
     return 1;
+#endif
 }
 
 int
