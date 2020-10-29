@@ -161,8 +161,8 @@ inline T Atomic::PlatformLoad<8>::operator()(T const volatile* src) const {
 
 template<>
 template<typename T>
-inline void Atomic::PlatformStore<8>::operator()(T store_value,
-                                                 T volatile* dest) const {
+inline void Atomic::PlatformStore<8>::operator()(T volatile* dest,
+                                                 T store_value) const {
   STATIC_ASSERT(8 == sizeof(T));
   _Atomic_move_long(reinterpret_cast<const volatile jlong*>(&store_value), reinterpret_cast<volatile jlong*>(dest));
 }
