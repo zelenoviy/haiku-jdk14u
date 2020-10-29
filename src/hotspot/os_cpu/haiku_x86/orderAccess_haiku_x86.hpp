@@ -47,14 +47,12 @@ inline void OrderAccess::acquire()    { compiler_barrier(); }
 inline void OrderAccess::release()    { compiler_barrier(); }
 
 inline void OrderAccess::fence() {
-  if (os::is_MP()) {
     // always use locked addl since mfence is sometimes expensive
 #ifdef AMD64
-    __asm__ volatile ("lock; addl $0,0(%%rsp)" : : : "cc", "memory");
+  __asm__ volatile ("lock; addl $0,0(%%rsp)" : : : "cc", "memory");
 #else
-    __asm__ volatile ("lock; addl $0,0(%%esp)" : : : "cc", "memory");
+  __asm__ volatile ("lock; addl $0,0(%%esp)" : : : "cc", "memory");
 #endif
-  }
   compiler_barrier();
 }
 
@@ -62,55 +60,5 @@ inline void OrderAccess::cross_modify_fence() {
   int idx = 0;
   __asm__ volatile ("cpuid " : "+a" (idx) : : "ebx", "ecx", "edx", "memory");
 }
-
-template<>
-struct OrderAccess::PlatformOrderedStore<1, RELEASE_X_FENCE>
-{
-  template <typename T>
-  void operator()(T v, volatile T* p) const {
-    __asm__ volatile (  "xchgb (%2),%0"
-                      : "=q" (v)
-                      : "0" (v), "r" (p)
-                      : "memory");
-  }
-};
-
-template<>
-struct OrderAccess::PlatformOrderedStore<2, RELEASE_X_FENCE>
-{
-  template <typename T>
-  void operator()(T v, volatile T* p) const {
-    __asm__ volatile (  "xchgw (%2),%0"
-                      : "=r" (v)
-                      : "0" (v), "r" (p)
-                      : "memory");
-  }
-};
-
-template<>
-struct OrderAccess::PlatformOrderedStore<4, RELEASE_X_FENCE>
-{
-  template <typename T>
-  void operator()(T v, volatile T* p) const {
-    __asm__ volatile (  "xchgl (%2),%0"
-                      : "=r" (v)
-                      : "0" (v), "r" (p)
-                      : "memory");
-  }
-};
-
-#ifdef AMD64
-template<>
-struct OrderAccess::PlatformOrderedStore<8, RELEASE_X_FENCE>
-{
-  template <typename T>
-  void operator()(T v, volatile T* p) const {
-    __asm__ volatile (  "xchgq (%2), %0"
-                      : "=r" (v)
-                      : "0" (v), "r" (p)
-                      : "memory");
-  }
-};
-#endif // AMD64
 
 #endif // OS_CPU_HAIKU_X86_ORDERACCESS_HAIKU_X86_INLINE_HPP

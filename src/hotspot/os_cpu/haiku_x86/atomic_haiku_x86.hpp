@@ -169,4 +169,54 @@ inline void Atomic::PlatformStore<8>::operator()(T volatile* dest,
 
 #endif // AMD64
 
+template<>
+struct Atomic::PlatformOrderedStore<1, RELEASE_X_FENCE>
+{
+  template <typename T>
+  void operator()(volatile T* p, T v) const {
+    __asm__ volatile (  "xchgb (%2),%0"
+                      : "=q" (v)
+                      : "0" (v), "r" (p)
+                      : "memory");
+  }
+};
+
+template<>
+struct Atomic::PlatformOrderedStore<2, RELEASE_X_FENCE>
+{
+  template <typename T>
+  void operator()(volatile T* p, T v) const {
+    __asm__ volatile (  "xchgw (%2),%0"
+                      : "=r" (v)
+                      : "0" (v), "r" (p)
+                      : "memory");
+  }
+};
+
+template<>
+struct Atomic::PlatformOrderedStore<4, RELEASE_X_FENCE>
+{
+  template <typename T>
+  void operator()(volatile T* p, T v) const {
+    __asm__ volatile (  "xchgl (%2),%0"
+                      : "=r" (v)
+                      : "0" (v), "r" (p)
+                      : "memory");
+  }
+};
+
+#ifdef AMD64
+template<>
+struct Atomic::PlatformOrderedStore<8, RELEASE_X_FENCE>
+{
+  template <typename T>
+  void operator()(volatile T* p, T v) const {
+    __asm__ volatile (  "xchgq (%2), %0"
+                      : "=r" (v)
+                      : "0" (v), "r" (p)
+                      : "memory");
+  }
+};
+#endif // AMD64
+
 #endif // OS_CPU_HAIKU_X86_ATOMIC_HAIKU_X86_HPP
