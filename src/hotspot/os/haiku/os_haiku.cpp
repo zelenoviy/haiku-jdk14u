@@ -148,6 +148,13 @@ julong os::Haiku::available_memory() {
   return (julong)(si.max_pages - si.used_pages) * page_size();
 }
 
+void os::Haiku::print_uptime_info(outputStream* st) {
+  system_info si;
+  get_system_info(&si);
+  
+  os::print_dhm(st, "OS uptime:", si.boot_time / 1000000);
+}
+
 julong os::physical_memory() {
   return Haiku::physical_memory();
 }
@@ -1074,6 +1081,8 @@ void os::print_os_info(outputStream* st) {
   st->cr();
 
   os::Posix::print_uname_info(st);
+
+  os::Haiku::print_uptime_info(st);
 
   os::Posix::print_rlimit_info(st);
 

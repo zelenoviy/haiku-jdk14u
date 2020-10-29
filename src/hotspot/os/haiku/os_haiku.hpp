@@ -113,6 +113,8 @@ class Haiku {
 
   // none present
 
+private:
+  static void print_uptime_info(outputStream* st);
 };
 
 #endif // OS_HAIKU_OS_HAIKU_HPP
