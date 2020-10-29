@@ -32,12 +32,12 @@ struct Atomic::PlatformAdd
   : Atomic::FetchAndAdd<Atomic::PlatformAdd<byte_size> >
 {
   template<typename I, typename D>
-  D fetch_and_add(I add_value, D volatile* dest, atomic_memory_order /* order */) const;
+  D fetch_and_add(D volatile* dest, I add_value, atomic_memory_order /* order */) const;
 };
 
 template<>
 template<typename I, typename D>
-inline D Atomic::PlatformAdd<4>::fetch_and_add(I add_value, D volatile* dest,
+inline D Atomic::PlatformAdd<4>::fetch_and_add(D volatile* dest, I add_value,
                                                atomic_memory_order /* order */) const {
   STATIC_ASSERT(4 == sizeof(I));
   STATIC_ASSERT(4 == sizeof(D));
@@ -93,7 +93,7 @@ inline T Atomic::PlatformCmpxchg<4>::operator()(T volatile* dest,
 #ifdef AMD64
 template<>
 template<typename I, typename D>
-inline D Atomic::PlatformAdd<8>::fetch_and_add(I add_value, D volatile* dest,
+inline D Atomic::PlatformAdd<8>::fetch_and_add(D volatile* dest, I add_value,
                                                atomic_memory_order /* order */) const {
   STATIC_ASSERT(8 == sizeof(I));
   STATIC_ASSERT(8 == sizeof(D));
