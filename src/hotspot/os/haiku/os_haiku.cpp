@@ -2928,3 +2928,7 @@ bool os::start_debugging(char *buf, int buflen) {
   }
   return yes;
 }
+
+bool os::supports_map_sync() {
+  return false;
+}
