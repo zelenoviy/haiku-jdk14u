@@ -49,7 +49,9 @@
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
+#ifndef __HAIKU__
 #include <utmpx.h>
+#endif
 
 // Todo: provide a os::get_max_process_id() or similar. Number of processes
 // may have been configured, can be read more accurately from proc fs etc.
@@ -389,6 +391,7 @@ void os::Posix::print_load_average(outputStream* st) {
 // boot/uptime information;
 // unfortunately it does not work on macOS and Linux because the utx chain has no entry
 // for reboot at least on my test machines
+#ifndef __HAIKU__
 void os::Posix::print_uptime_info(outputStream* st) {
   int bootsec = -1;
   int currsec = time(NULL);
@@ -405,6 +408,7 @@ void os::Posix::print_uptime_info(outputStream* st) {
     os::print_dhm(st, "OS uptime:", (long) (currsec-bootsec));
   }
 }
+#endif
 
 
 void os::Posix::print_rlimit_info(outputStream* st) {
