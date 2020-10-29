@@ -612,9 +612,9 @@ mmx_acs_CopyLeft:
         ret
 
 
-        # Support for jlong Atomic::cmpxchg(jlong exchange_value,
+        # Support for jlong Atomic::cmpxchg(jlong compare_value,
         #                                   volatile jlong* dest,
-        #                                   jlong compare_value,
+        #                                   jlong exchange_value,
         #                                   bool is_MP)
         #
         .p2align 4,,15
