@@ -27,7 +27,7 @@
 #include "runtime/os.hpp"
 #include "runtime/os_perf.hpp"
 #include "utilities/globalDefinitions.hpp"
-#include "vm_version_ext_x86.hpp"
+#include CPU_HEADER(vm_version_ext)
 
 
 static const double NANOS_PER_SEC = 1000000000.0;
