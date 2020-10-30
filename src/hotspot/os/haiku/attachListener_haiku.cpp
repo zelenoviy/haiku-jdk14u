@@ -127,7 +127,7 @@ class HaikuAttachOperation: public AttachOperation {
 char HaikuAttachListener::_path[UNIX_PATH_MAX];
 bool HaikuAttachListener::_has_path;
 int HaikuAttachListener::_listener = -1;
-bool AixAttachListener::_atexit_registered = false;
+bool HaikuAttachListener::_atexit_registered = false;
 
 // Supporting class to help split a buffer into individual components
 class ArgumentIterator : public StackObj {
@@ -141,6 +141,10 @@ class ArgumentIterator : public StackObj {
   }
   char* next() {
     if (*_pos == '\0') {
+      // advance the iterator if possible (null arguments)
+      if (_pos < _end) {
+        _pos += 1;
+      }
       return NULL;
     }
     char* res = _pos;
@@ -158,11 +162,11 @@ class ArgumentIterator : public StackObj {
 // bound too.
 extern "C" {
   static void listener_cleanup() {
-    HaikuAttachListener::set_shutdown(true);
     int s = HaikuAttachListener::listener();
     if (s != -1) {
       HaikuAttachListener::set_listener(-1);
       ::shutdown(s, SHUT_RDWR);
+      ::close(s);
     }
     if (HaikuAttachListener::has_path()) {
       ::unlink(HaikuAttachListener::path());
@@ -201,25 +205,32 @@ int HaikuAttachListener::init() {
 
   // bind socket
   struct sockaddr_un addr;
+  memset((void *)&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   strcpy(addr.sun_path, initial_path);
   ::unlink(initial_path);
   int res = ::bind(listener, (struct sockaddr*)&addr, sizeof(addr));
   if (res == -1) {
-    RESTARTABLE(::close(listener), res);
+    ::close(listener);
     return -1;
   }
 
   // put in listen mode, set permissions, and rename into place
   res = ::listen(listener, 5);
   if (res == 0) {
-      RESTARTABLE(::chmod(initial_path, S_IREAD|S_IWRITE), res);
+    RESTARTABLE(::chmod(initial_path, S_IREAD|S_IWRITE), res);
+    if (res == 0) {
+      // make sure the file is owned by the effective user and effective group
+      // e.g. default behavior on mac is that new files inherit the group of
+      // the directory that they are created in
+      RESTARTABLE(::chown(initial_path, geteuid(), getegid()), res);
       if (res == 0) {
-          res = ::rename(initial_path, path);
+        res = ::rename(initial_path, path);
       }
+    }
   }
   if (res == -1) {
-    RESTARTABLE(::close(listener), res);
+    ::close(listener);
     ::unlink(initial_path);
     return -1;
   }
@@ -261,6 +272,7 @@ HaikuAttachOperation* HaikuAttachListener::read_request(int s) {
   do {
     int n;
     RESTARTABLE(read(s, buf+off, left), n);
+    assert(n <= left, "buffer was too small, impossible!");
     if (n == -1) {
       return NULL;      // reset by peer or other error
     }
@@ -347,24 +359,22 @@ HaikuAttachOperation* HaikuAttachListener::dequeue() {
     struct ucred cred_info;
     socklen_t optlen = sizeof(cred_info);
     if (::getsockopt(s, SOL_SOCKET, SO_PEERCRED, (void*)&cred_info, &optlen) == -1) {
-      int res;
-      RESTARTABLE(::close(s), res);
+      log_debug(attach)("Failed to get socket option SO_PEERCRED");
+      ::close(s);
       continue;
     }
-    uid_t euid = geteuid();
-    gid_t egid = getegid();
 
-    if (cred_info.uid != euid || cred_info.gid != egid) {
-      int res;
-      RESTARTABLE(::close(s), res);
+    if (!os::Posix::matches_effective_uid_and_gid_or_root(cred_info.uid, cred_info.gid)) {
+      log_debug(attach)("euid/egid check failed (%d/%d vs %d/%d)",
+              cred_info.uid, cred_info.gid, geteuid(), getegid());
+      ::close(s);
       continue;
     }
 
     // peer credential look okay so we read the request
     HaikuAttachOperation* op = read_request(s);
     if (op == NULL) {
-      int res;
-      RESTARTABLE(::close(s), res);
+      ::close(s);
       continue;
     } else {
       return op;
@@ -415,7 +425,7 @@ void HaikuAttachOperation::complete(jint result, bufferedStream* st) {
   }
 
   // done
-  RESTARTABLE(::close(this->socket()), rc);
+  ::close(this->socket());
 
   // were we externally suspended while we were waiting?
   thread->check_and_wait_while_suspended();
@@ -442,9 +452,8 @@ AttachOperation* AttachListener::dequeue() {
   return op;
 }
 
-
 // Performs initialization at vm startup
-// For Linux we remove any stale .java_pid file which could cause
+// For Haiku we remove any stale .java_pid file which could cause
 // an attaching process to think we are ready to receive on the
 // domain socket before we are properly initialized
 
@@ -461,7 +470,7 @@ void AttachListener::vm_start() {
   if (ret == 0) {
     ret = ::unlink(fn);
     if (ret == -1) {
-      debug_only(warning("failed to remove stale attach pid file at %s", fn));
+      log_debug(attach)("Failed to remove stale attach pid file at %s", fn);
     }
   }
 }
@@ -520,19 +529,24 @@ bool AttachListener::is_init_trigger() {
   if (init_at_startup() || is_initialized()) {
     return false;               // initialized at startup or already initialized
   }
-  char path[PATH_MAX+1];
-  snprintf(path, sizeof(path), "%s/.attach_pid%d",
-           os::get_temp_directory(), os::current_process_id());
+  char fn[PATH_MAX + 1];
   int ret;
   struct stat st;
-  RESTARTABLE(::stat(path, &st), ret);
-
+  snprintf(fn, PATH_MAX + 1, "%s/.attach_pid%d",
+           os::get_temp_directory(), os::current_process_id());
+  RESTARTABLE(::stat(fn, &st), ret);
+  if (ret == -1) {
+    log_debug(attach)("Failed to find attach file: %s", fn);
+  }
   if (ret == 0) {
     // simple check to avoid starting the attach mechanism when
-    // a bogus user creates the file
-    if (st.st_uid == geteuid()) {
+    // a bogus non-root user creates the file
+    if (os::Posix::matches_effective_uid_or_root(st.st_uid)) {
       init();
+      log_trace(attach)("Attach triggered by %s", fn);
       return true;
+    } else {
+      log_debug(attach)("File %s has wrong user id %d (vs %d). Attach is not triggered", fn, st.st_uid, geteuid());
     }
   }
   return false;
