@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2017 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -24,19 +24,35 @@
  * questions.
  */
 
+/* Empty stubs for now to satisfy the new build process.                 */
+
 #include <jni.h>
 #include "com_sun_management_internal_OperatingSystemImpl.h"
 
 JNIEXPORT jdouble JNICALL
-Java_com_sun_management_internal_OperatingSystemImpl_getSystemCpuLoad0
+Java_com_sun_management_internal_OperatingSystemImpl_getCpuLoad0
 (JNIEnv *env, jobject dummy)
 {
-  return -1.0;
+    return -1.0;
 }
 
 JNIEXPORT jdouble JNICALL
 Java_com_sun_management_internal_OperatingSystemImpl_getProcessCpuLoad0
 (JNIEnv *env, jobject dummy)
 {
-  return -1.0;
+    return -1.0;
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_sun_management_internal_OperatingSystemImpl_getSingleCpuLoad0
+(JNIEnv *env, jobject dummy, jint cpu_number)
+{
+    return -1.0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sun_management_internal_OperatingSystemImpl_getHostConfiguredCpuCount0
+(JNIEnv *env, jobject mbean)
+{
+    return -1;
 }

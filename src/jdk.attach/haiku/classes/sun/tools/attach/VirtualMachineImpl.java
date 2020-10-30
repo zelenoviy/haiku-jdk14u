@@ -24,7 +24,7 @@
  */
 package sun.tools.attach;
 
-import com.sun.tools.attach.VirtualMachine;
+import com.sun.tools.attach.AttachOperationFailedException;
 import com.sun.tools.attach.AgentLoadException;
 import com.sun.tools.attach.AttachNotSupportedException;
 import com.sun.tools.attach.spi.AttachProvider;
@@ -37,18 +37,13 @@ import java.io.File;
  * Haiku implementation of HotSpotVirtualMachine
  */
 public class VirtualMachineImpl extends HotSpotVirtualMachine {
-    // "tmpdir" is used as a global well-known location for the files
+    // "/tmp" is used as a global well-known location for the files
     // .java_pid<pid>. and .attach_pid<pid>. It is important that this
     // location is the same for all processes, otherwise the tools
     // will not be able to find all Hotspot processes.
-    // This is intentionally not the same as java.io.tmpdir, since
-    // the latter can be changed by the user.
     // Any changes to this needs to be synchronized with HotSpot.
-    private static final String tmpdir;
-
-    // The patch to the socket file created by the target VM
-    String path;
-
+    private static final String tmpdir = "/tmp";
+    String socket_path;
     /**
      * Attaches to the target VM
      */
@@ -61,34 +56,47 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
         int pid;
         try {
             pid = Integer.parseInt(vmid);
+            if (pid < 1) {
+                throw new NumberFormatException();
+            }
         } catch (NumberFormatException x) {
-            throw new AttachNotSupportedException("Invalid process identifier");
+            throw new AttachNotSupportedException("Invalid process identifier: " + vmid);
         }
 
         // Find the socket file. If not found then we attempt to start the
         // attach mechanism in the target VM by sending it a QUIT signal.
         // Then we attempt to find the socket file again.
-        path = findSocketFile(pid);
-        if (path == null) {
+        File socket_file = new File(tmpdir, ".java_pid" + pid);
+        socket_path = socket_file.getPath();
+        if (!socket_file.exists()) {
             File f = createAttachFile(pid);
             try {
                 sendQuitTo(pid);
 
                 // give the target VM time to start the attach mechanism
-                int i = 0;
-                long delay = 200;
-                int retries = (int)(attachTimeout() / delay);
+                final int delay_step = 100;
+                final long timeout = attachTimeout();
+                long time_spend = 0;
+                long delay = 0;
                 do {
+                    // Increase timeout on each attempt to reduce polling
+                    delay += delay_step;
                     try {
                         Thread.sleep(delay);
                     } catch (InterruptedException x) { }
-                    path = findSocketFile(pid);
-                    i++;
-                } while (i <= retries && path == null);
-                if (path == null) {
+
+                    time_spend += delay;
+                    if (time_spend > timeout/2 && !socket_file.exists()) {
+                        // Send QUIT again to give target VM the last chance to react
+                        sendQuitTo(pid);
+                    }
+                } while (time_spend <= timeout && !socket_file.exists());
+                if (!socket_file.exists()) {
                     throw new AttachNotSupportedException(
-                        "Unable to open socket file: target process not responding " +
-                        "or HotSpot VM not loaded");
+                        String.format("Unable to open socket file %s: " +
+                          "target process %d doesn't respond within %dms " +
+                          "or HotSpot VM not loaded", socket_path, pid,
+                                      time_spend));
                 }
             } finally {
                 f.delete();
@@ -97,14 +105,14 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
 
         // Check that the file owner/permission to avoid attaching to
         // bogus process
-        checkPermissions(path);
+        checkPermissions(socket_path);
 
         // Check that we can connect to the process
         // - this ensures we throw the permission denied error now rather than
         // later when we attempt to enqueue a command.
         int s = socket();
         try {
-            connect(s, path);
+            connect(s, socket_path);
         } finally {
             close(s);
         }
@@ -115,8 +123,8 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
      */
     public void detach() throws IOException {
         synchronized (this) {
-            if (this.path != null) {
-                this.path = null;
+            if (socket_path != null) {
+                socket_path = null;
             }
         }
     }
@@ -131,15 +139,13 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
      * Execute the given command in the target VM.
      */
     InputStream execute(String cmd, Object ... args) throws AgentLoadException, IOException {
-        assert args.length <= 4;                // includes null
+        assert args.length <= 3;                // includes null
 
         // did we detach?
-        String p;
         synchronized (this) {
-            if (this.path == null) {
+            if (socket_path == null) {
                 throw new IOException("Detached from target VM");
             }
-            p = this.path;
         }
 
         // create UNIX socket
@@ -147,7 +153,7 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
 
         // connect to target VM
         try {
-            connect(s, p);
+            connect(s, socket_path);
         } catch (IOException x) {
             close(s);
             throw x;
@@ -161,7 +167,7 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
             writeString(s, PROTOCOL_VERSION);
             writeString(s, cmd);
 
-            for (int i=0; i<4; i++) {
+            for (int i = 0; i < 3; i++) {
                 if (i < args.length && args[i] != null) {
                     writeString(s, (String)args[i]);
                 } else {
@@ -190,6 +196,8 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
         }
 
         if (completionStatus != 0) {
+            // read from the stream and use that as the error message
+            String message = readErrorMessage(sis);
             sis.close();
 
             // In the event of a protocol mismatch then the target VM
@@ -202,9 +210,14 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
             // Special-case the "load" command so that the right exception is
             // thrown.
             if (cmd.equals("load")) {
-                throw new AgentLoadException("Failed to load agent library");
+                String msg = "Failed to load agent library";
+                if (!message.isEmpty())
+                    msg += ": " + message;
+                throw new AgentLoadException(msg);
             } else {
-                throw new IOException("Command failed in target VM");
+                if (message.isEmpty())
+                    message = "Command failed in target VM";
+                throw new AttachOperationFailedException(message);
             }
         }
 
@@ -216,7 +229,7 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
      * InputStream for the socket connection to get target VM
      */
     private class SocketInputStream extends InputStream {
-        int s;
+        int s = -1;
 
         public SocketInputStream(int s) {
             this.s = s;
@@ -236,23 +249,20 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
             if ((off < 0) || (off > bs.length) || (len < 0) ||
                 ((off + len) > bs.length) || ((off + len) < 0)) {
                 throw new IndexOutOfBoundsException();
-            } else if (len == 0)
+            } else if (len == 0) {
                 return 0;
+            }
 
             return VirtualMachineImpl.read(s, bs, off, len);
         }
 
-        public void close() throws IOException {
-            VirtualMachineImpl.close(s);
+        public synchronized void close() throws IOException {
+            if (s != -1) {
+                int toClose = s;
+                s = -1;
+                VirtualMachineImpl.close(toClose);
+            }
         }
-    }
-
-    // Return the socket file for the given process.
-    // Checks the temp directory.
-    private String findSocketFile(int pid) {
-        String fn = ".java_pid" + pid;
-        File f = new File(tmpdir, fn);
-        return f.exists() ? f.getPath() : null;
     }
 
     // On Haiku a simple handshake is used to start the attach mechanism if not
@@ -275,7 +285,7 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
             try {
                 b = s.getBytes("UTF-8");
             } catch (java.io.UnsupportedEncodingException x) {
-                throw new InternalError();
+                throw new InternalError(x);
             }
             VirtualMachineImpl.write(fd, b, 0, b.length);
         }
@@ -301,10 +311,7 @@ public class VirtualMachineImpl extends HotSpotVirtualMachine {
 
     static native void write(int fd, byte buf[], int off, int bufLen) throws IOException;
 
-    static native String getTempDir();
-
     static {
         System.loadLibrary("attach");
-        tmpdir = getTempDir();
     }
 }
