@@ -58,7 +58,7 @@ ifeq ($(call isTargetOs, solaris), false)
       #
 endif
 
-ifeq ($(call isTargetOs, solaris macosx aix), false)
+ifeq ($(call isTargetOs, solaris macosx aix haiku), false)
   java.base_EXCLUDE_FILES += sun/nio/fs/PollingWatchService.java
 endif
 
